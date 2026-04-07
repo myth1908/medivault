@@ -3,7 +3,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Medical Profiles
 CREATE TABLE IF NOT EXISTS medical_profiles (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
   blood_type TEXT,
   allergies TEXT[] DEFAULT '{}',
@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS medical_profiles (
 
 -- Emergency Contacts
 CREATE TABLE IF NOT EXISTS emergency_contacts (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   phone TEXT NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS emergency_contacts (
 
 -- Emergency Incidents
 CREATE TABLE IF NOT EXISTS emergency_incidents (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   type TEXT NOT NULL DEFAULT 'other' CHECK (type IN ('cardiac', 'trauma', 'respiratory', 'neurological', 'other')),
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'responding', 'resolved', 'cancelled')),
