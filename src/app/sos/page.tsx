@@ -1,0 +1,304 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { AlertCircle, CheckCircle, Loader2, MapPin, Phone, X } from 'lucide-react'
+import Button from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
+import type { EmergencyContact, MedicalProfile } from '@/types'
+
+type SOSStatus = 'idle' | 'locating' | 'confirming' | 'sending' | 'active' | 'cancelled'
+
+const emergencyTypes = [
+  { id: 'cardiac', label: 'Cardiac / Heart', emoji: '❤️', color: 'border-red-400 bg-red-50' },
+  { id: 'trauma', label: 'Trauma / Injury', emoji: '🩹', color: 'border-orange-400 bg-orange-50' },
+  { id: 'respiratory', label: 'Respiratory', emoji: '🫁', color: 'border-blue-400 bg-blue-50' },
+  { id: 'neurological', label: 'Neurological', emoji: '🧠', color: 'border-purple-400 bg-purple-50' },
+  { id: 'other', label: 'Other Emergency', emoji: '🚨', color: 'border-gray-400 bg-gray-50' },
+]
+
+export default function SOSPage() {
+  const [status, setStatus] = useState<SOSStatus>('idle')
+  const [selectedType, setSelectedType] = useState<string>('')
+  const [location, setLocation] = useState<{ lat: number; lng: number; address: string } | null>(null)
+  const [contacts, setContacts] = useState<EmergencyContact[]>([])
+  const [profile, setProfile] = useState<MedicalProfile | null>(null)
+  const [countdown, setCountdown] = useState(10)
+  const [incidentId, setIncidentId] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const supabase = createClient()
+    const loadData = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const [{ data: c }, { data: p }] = await Promise.all([
+        supabase.from('emergency_contacts').select('*').eq('user_id', user.id),
+        supabase.from('medical_profiles').select('*').eq('user_id', user.id).single(),
+      ])
+      if (c) setContacts(c)
+      if (p) setProfile(p)
+    }
+    loadData()
+  }, [])
+
+  const getLocation = (): Promise<{ lat: number; lng: number; address: string }> => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Geolocation not supported'))
+        return
+      }
+      navigator.geolocation.getCurrentPosition(
+        async pos => {
+          const { latitude: lat, longitude: lng } = pos.coords
+          // Try to reverse geocode for address
+          let address = `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+          try {
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`
+            )
+            const data = await res.json()
+            address = data.display_name || address
+          } catch {
+            // fallback to coordinates
+          }
+          resolve({ lat, lng, address })
+        },
+        err => reject(err),
+        { enableHighAccuracy: true, timeout: 10000 }
+      )
+    })
+  }
+
+  const handleSOSPress = async () => {
+    setStatus('locating')
+    setError('')
+
+    try {
+      const loc = await getLocation()
+      setLocation(loc)
+      setStatus('confirming')
+      setCountdown(10)
+    } catch {
+      setError('Could not get your location. Using approximate location.')
+      setLocation({ lat: 0, lng: 0, address: 'Location unavailable' })
+      setStatus('confirming')
+      setCountdown(10)
+    }
+  }
+
+  useEffect(() => {
+    if (status !== 'confirming') return
+    if (countdown <= 0) {
+      sendSOS()
+      return
+    }
+    const timer = setTimeout(() => setCountdown(c => c - 1), 1000)
+    return () => clearTimeout(timer)
+  }, [status, countdown])
+
+  const sendSOS = async () => {
+    setStatus('sending')
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { data: incident } = await supabase
+      .from('emergency_incidents')
+      .insert({
+        user_id: user.id,
+        type: selectedType || 'other',
+        status: 'active',
+        location_lat: location?.lat || 0,
+        location_lng: location?.lng || 0,
+        location_address: location?.address || 'Unknown',
+      })
+      .select()
+      .single()
+
+    if (incident) setIncidentId(incident.id)
+    setStatus('active')
+  }
+
+  const cancelSOS = async () => {
+    if (status === 'confirming') {
+      setStatus('idle')
+      setCountdown(10)
+      return
+    }
+    if (incidentId) {
+      const supabase = createClient()
+      await supabase
+        .from('emergency_incidents')
+        .update({ status: 'cancelled' })
+        .eq('id', incidentId)
+    }
+    setStatus('cancelled')
+  }
+
+  if (status === 'active') {
+    return (
+      <div className="max-w-xl mx-auto px-4 py-8">
+        <div className="bg-red-600 rounded-3xl p-8 text-white text-center mb-6">
+          <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 animate-ping absolute left-1/2 -translate-x-1/2" />
+          <AlertCircle className="w-20 h-20 mx-auto mb-4 relative" />
+          <h1 className="text-3xl font-extrabold mb-2">SOS ACTIVE</h1>
+          <p className="text-red-100">Emergency alert sent. Help is on the way.</p>
+        </div>
+
+        <div className="space-y-4 mb-6">
+          <Card>
+            <div className="flex items-center gap-3 mb-3">
+              <MapPin className="w-4 h-4 text-gray-500" />
+              <span className="text-sm font-semibold">Your Location</span>
+            </div>
+            <p className="text-sm text-gray-600">{location?.address || 'Getting location...'}</p>
+          </Card>
+
+          {contacts.length > 0 && (
+            <Card>
+              <div className="flex items-center gap-2 mb-3">
+                <Phone className="w-4 h-4 text-gray-500" />
+                <span className="text-sm font-semibold">Contacts Notified</span>
+              </div>
+              <div className="space-y-2">
+                {contacts.slice(0, 3).map(c => (
+                  <div key={c.id} className="flex items-center gap-2 text-sm">
+                    <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                    <span>{c.name} ({c.relationship})</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {profile && (
+            <Card variant="emergency">
+              <p className="text-xs font-semibold text-red-700 mb-2">Medical Info for Responders</p>
+              <div className="space-y-1 text-sm text-gray-700">
+                {profile.blood_type && <p>🩸 Blood Type: <strong>{profile.blood_type}</strong></p>}
+                {profile.allergies?.length > 0 && <p>⚠️ Allergies: {profile.allergies.join(', ')}</p>}
+                {profile.medications?.length > 0 && <p>💊 Medications: {profile.medications.join(', ')}</p>}
+              </div>
+            </Card>
+          )}
+        </div>
+
+        <Button
+          variant="outline"
+          className="w-full"
+          size="lg"
+          onClick={cancelSOS}
+        >
+          <X className="w-4 h-4" />
+          Cancel Emergency Alert
+        </Button>
+      </div>
+    )
+  }
+
+  if (status === 'cancelled') {
+    return (
+      <div className="max-w-xl mx-auto px-4 py-8 text-center">
+        <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <CheckCircle className="w-10 h-10 text-green-600" />
+        </div>
+        <h1 className="text-2xl font-extrabold text-gray-900 mb-2">Alert Cancelled</h1>
+        <p className="text-gray-600 mb-8">Your emergency alert has been cancelled.</p>
+        <Button onClick={() => setStatus('idle')} size="lg">Return to SOS</Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-xl mx-auto px-4 py-8">
+      <div className="text-center mb-8">
+        <h1 className="text-2xl font-extrabold text-gray-900">Emergency SOS</h1>
+        <p className="text-gray-600 mt-1">Press the button to send an emergency alert</p>
+      </div>
+
+      {/* Big SOS Button */}
+      <div className="flex flex-col items-center mb-10">
+        <button
+          onClick={status === 'idle' ? handleSOSPress : undefined}
+          disabled={status === 'locating' || status === 'sending'}
+          className="relative w-48 h-48 rounded-full bg-red-600 text-white shadow-2xl shadow-red-300 hover:bg-red-700 active:scale-95 transition-all disabled:opacity-70 cursor-pointer"
+        >
+          {status === 'locating' ? (
+            <div className="flex flex-col items-center gap-2">
+              <Loader2 className="w-12 h-12 animate-spin" />
+              <span className="font-bold text-lg">Locating...</span>
+            </div>
+          ) : status === 'confirming' ? (
+            <div className="flex flex-col items-center">
+              <span className="text-6xl font-extrabold">{countdown}</span>
+              <span className="text-sm font-medium mt-1">Sending in...</span>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              <AlertCircle className="w-14 h-14" />
+              <span className="text-2xl font-extrabold">SOS</span>
+            </div>
+          )}
+          {/* Pulse rings */}
+          {status === 'idle' && (
+            <>
+              <span className="absolute inset-0 rounded-full bg-red-400 opacity-30 animate-ping" />
+              <span className="absolute -inset-2 rounded-full bg-red-300 opacity-20 animate-ping animation-delay-150" />
+            </>
+          )}
+        </button>
+
+        {status === 'confirming' && (
+          <Button
+            variant="outline"
+            className="mt-6"
+            onClick={cancelSOS}
+          >
+            <X className="w-4 h-4" />
+            Cancel
+          </Button>
+        )}
+      </div>
+
+      {error && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+          {error}
+        </div>
+      )}
+
+      {/* Emergency Type */}
+      <div className="mb-8">
+        <h2 className="text-sm font-semibold text-gray-700 mb-3">Emergency type (optional)</h2>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {emergencyTypes.map(type => (
+            <button
+              key={type.id}
+              onClick={() => setSelectedType(t => t === type.id ? '' : type.id)}
+              className={`p-3 rounded-xl border-2 text-left transition-all ${
+                selectedType === type.id
+                  ? type.color + ' border-opacity-100'
+                  : 'border-gray-200 bg-white hover:border-gray-300'
+              }`}
+            >
+              <div className="text-xl mb-1">{type.emoji}</div>
+              <div className="text-xs font-medium text-gray-800">{type.label}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Info */}
+      <Card className="bg-gray-50">
+        <p className="text-xs font-semibold text-gray-700 mb-2">What happens when you press SOS:</p>
+        <div className="space-y-1.5 text-xs text-gray-600">
+          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Your GPS location is captured</div>
+          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Emergency contacts are notified</div>
+          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Alert logged with your medical profile</div>
+          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Responders can access your health info</div>
+        </div>
+      </Card>
+    </div>
+  )
+}
