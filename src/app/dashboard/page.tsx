@@ -8,6 +8,8 @@ import {
   ChevronRight,
   Heart,
   Hospital,
+  Info,
+  Megaphone,
   Phone,
   Shield,
   User,
@@ -77,6 +79,17 @@ export default async function DashboardPage() {
     .select('*')
     .eq('user_id', user.id)
 
+  // Load active announcements (non-expired, published, pinned first)
+  const now = new Date().toISOString()
+  const { data: announcements } = await supabase
+    .from('announcements')
+    .select('id, title, body, type, pinned')
+    .eq('published', true)
+    .or(`expires_at.is.null,expires_at.gt.${now}`)
+    .order('pinned', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(5)
+
   const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'there'
   const profileComplete = profile && profile.blood_type && profile.allergies?.length > 0
   const contactsCount = contacts?.length || 0
@@ -90,6 +103,32 @@ export default async function DashboardPage() {
         </h1>
         <p className="text-gray-600 mt-1">Your emergency dashboard is ready.</p>
       </div>
+
+      {/* Announcements from admin */}
+      {announcements && announcements.length > 0 && (
+        <div className="mb-6 space-y-2">
+          {announcements.map(ann => {
+            const styles = {
+              emergency: { bg: 'bg-red-50 border-red-200', text: 'text-red-800', icon: 'text-red-500' },
+              warning:   { bg: 'bg-amber-50 border-amber-200', text: 'text-amber-800', icon: 'text-amber-500' },
+              success:   { bg: 'bg-green-50 border-green-200', text: 'text-green-800', icon: 'text-green-500' },
+              info:      { bg: 'bg-blue-50 border-blue-200', text: 'text-blue-800', icon: 'text-blue-500' },
+            }
+            const s = styles[ann.type as keyof typeof styles] ?? styles.info
+            return (
+              <div key={ann.id} className={`flex items-start gap-3 p-4 border rounded-2xl ${s.bg}`}>
+                <div className={`flex-shrink-0 mt-0.5 ${s.icon}`}>
+                  {ann.type === 'emergency' ? <Megaphone className="w-4 h-4" /> : <Info className="w-4 h-4" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-semibold ${s.text}`}>{ann.title}</p>
+                  {ann.body && <p className={`text-xs mt-0.5 ${s.text} opacity-80`}>{ann.body}</p>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Status Alerts */}
       {(!profileComplete || contactsCount === 0) && (
