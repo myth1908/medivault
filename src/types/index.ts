@@ -1,10 +1,43 @@
+export type UserRole = 'user' | 'responder' | 'admin' | 'superadmin'
+
+export const ROLE_LABELS: Record<UserRole, string> = {
+  user: 'User',
+  responder: 'Responder',
+  admin: 'Admin',
+  superadmin: 'Superadmin',
+}
+
+export const ROLE_HIERARCHY: Record<UserRole, number> = {
+  user: 0,
+  responder: 1,
+  admin: 2,
+  superadmin: 3,
+}
+
+export function canManageRole(actorRole: UserRole, targetRole: UserRole): boolean {
+  return ROLE_HIERARCHY[actorRole] > ROLE_HIERARCHY[targetRole]
+}
+
 export interface User {
   id: string
   email: string
   full_name: string
   avatar_url?: string
-  role: 'user' | 'responder' | 'admin'
+  role: UserRole
   created_at: string
+}
+
+export interface UserWithRole {
+  id: string
+  email: string
+  full_name: string
+  created_at: string
+  role: UserRole
+  profile?: {
+    blood_type: string | null
+    organ_donor: boolean
+    allergies: string[]
+  }
 }
 
 export interface MedicalProfile {

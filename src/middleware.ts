@@ -30,19 +30,25 @@ export async function middleware(request: NextRequest) {
   const authPaths = ['/auth/login', '/auth/signup']
 
   const isProtected = protectedPaths.some(p => request.nextUrl.pathname.startsWith(p))
-  const isAdmin = adminPaths.some(p => request.nextUrl.pathname.startsWith(p))
+  const isAdminPath = adminPaths.some(p => request.nextUrl.pathname.startsWith(p))
   const isAuth = authPaths.some(p => request.nextUrl.pathname.startsWith(p))
 
-  if ((isProtected || isAdmin) && !user) {
+  // Unauthenticated → redirect to login
+  if ((isProtected || isAdminPath) && !user) {
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
     url.searchParams.set('redirect', request.nextUrl.pathname)
     return NextResponse.redirect(url)
   }
 
+  // Already logged in → skip auth pages
   if (isAuth && user) {
     return NextResponse.redirect(new URL('/dashboard', request.url))
   }
+
+  // Pass the current pathname as a header so Server Components can read it
+  // (needed for active nav highlighting without usePathname in RSC)
+  supabaseResponse.headers.set('x-pathname', request.nextUrl.pathname)
 
   return supabaseResponse
 }
