@@ -1,40 +1,58 @@
+import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
-import { Activity, AlertCircle, CheckCircle, Users } from 'lucide-react'
+import { AlertCircle, CheckCircle, Users, Shield, Clock } from 'lucide-react'
 
 export default async function AdminPage() {
   const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const adminClient = createAdminClient()
 
   const [
     { count: userCount },
     { count: activeIncidents },
     { count: resolvedIncidents },
+    { count: adminCount },
     { data: recentIncidents },
+    { data: recentAuditLogs },
   ] = await Promise.all([
-    supabase.from('medical_profiles').select('*', { count: 'exact', head: true }),
-    supabase.from('emergency_incidents').select('*', { count: 'exact', head: true }).eq('status', 'active'),
-    supabase.from('emergency_incidents').select('*', { count: 'exact', head: true }).eq('status', 'resolved'),
-    supabase.from('emergency_incidents').select('*').order('created_at', { ascending: false }).limit(10),
+    adminClient.from('user_roles').select('*', { count: 'exact', head: true }),
+    adminClient.from('emergency_incidents').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+    adminClient.from('emergency_incidents').select('*', { count: 'exact', head: true }).eq('status', 'resolved'),
+    adminClient.from('user_roles').select('*', { count: 'exact', head: true }).in('role', ['admin', 'superadmin']),
+    adminClient
+      .from('emergency_incidents')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(8),
+    adminClient
+      .from('admin_audit_log')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(5),
   ])
 
   const stats = [
-    { label: 'Total Users', value: userCount || 0, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'Active Emergencies', value: activeIncidents || 0, icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-50' },
-    { label: 'Resolved Today', value: resolvedIncidents || 0, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
-    { label: 'Uptime', value: '99.9%', icon: Activity, color: 'text-purple-600', bg: 'bg-purple-50' },
+    { label: 'Total Users', value: userCount ?? 0, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'Active Emergencies', value: activeIncidents ?? 0, icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-50' },
+    { label: 'Resolved Incidents', value: resolvedIncidents ?? 0, icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
+    { label: 'Admins', value: adminCount ?? 0, icon: Shield, color: 'text-purple-600', bg: 'bg-purple-50' },
   ]
 
   return (
     <div>
       <div className="mb-8">
         <h1 className="text-2xl font-extrabold text-gray-900">Admin Overview</h1>
-        <p className="text-gray-600">Platform health and emergency statistics</p>
+        <p className="text-gray-500 mt-1">Platform health and emergency statistics</p>
       </div>
 
+      {/* Stats grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {stats.map(({ label, value, icon: Icon, color, bg }) => (
           <Card key={label}>
-            <div className="flex items-center gap-3 mb-2">
+            <div className="flex items-center gap-3 mb-3">
               <div className={`p-2 rounded-xl ${bg}`}>
                 <Icon className={`w-5 h-5 ${color}`} />
               </div>
@@ -45,41 +63,79 @@ export default async function AdminPage() {
         ))}
       </div>
 
-      <Card>
-        <CardHeader><CardTitle>Recent Emergency Incidents</CardTitle></CardHeader>
-        <CardContent>
-          {!recentIncidents || recentIncidents.length === 0 ? (
-            <p className="text-sm text-gray-500 text-center py-8">No incidents recorded yet.</p>
-          ) : (
-            <div className="space-y-3">
-              {recentIncidents.map((incident) => (
-                <div key={incident.id} className="flex items-center gap-4 p-3 rounded-xl bg-gray-50">
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    incident.status === 'active' ? 'bg-red-500' :
-                    incident.status === 'resolved' ? 'bg-green-500' : 'bg-gray-400'
-                  }`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 capitalize">{incident.type} Emergency</p>
-                    <p className="text-xs text-gray-500 truncate">{incident.location_address}</p>
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Recent Incidents */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-500" />
+              Recent Incidents
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!recentIncidents || recentIncidents.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-6">No incidents recorded yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {recentIncidents.map((incident) => (
+                  <div key={incident.id} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                      incident.status === 'active' ? 'bg-red-500' :
+                      incident.status === 'responding' ? 'bg-amber-500' :
+                      incident.status === 'resolved' ? 'bg-green-500' : 'bg-gray-400'
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 capitalize">{incident.type} Emergency</p>
+                      <p className="text-xs text-gray-500 truncate">{incident.location_address || 'Location unavailable'}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
+                        incident.status === 'active' ? 'bg-red-100 text-red-700' :
+                        incident.status === 'responding' ? 'bg-amber-100 text-amber-700' :
+                        incident.status === 'resolved' ? 'bg-green-100 text-green-700' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        {incident.status}
+                      </span>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
-                      incident.status === 'active' ? 'bg-red-100 text-red-700' :
-                      incident.status === 'resolved' ? 'bg-green-100 text-green-700' :
-                      'bg-gray-100 text-gray-600'
-                    }`}>
-                      {incident.status}
-                    </span>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {new Date(incident.created_at).toLocaleDateString()}
-                    </p>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Recent audit log */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-gray-500" />
+              Recent Admin Actions
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!recentAuditLogs || recentAuditLogs.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-6">No admin actions recorded yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {recentAuditLogs.map((log) => (
+                  <div key={log.id} className="p-3 rounded-xl bg-gray-50">
+                    <p className="text-sm font-medium text-gray-900">{log.action}</p>
+                    <div className="flex items-center justify-between mt-1">
+                      <p className="text-xs text-gray-500">
+                        {log.target_type && `on ${log.target_type}`}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {new Date(log.created_at).toLocaleString()}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }
