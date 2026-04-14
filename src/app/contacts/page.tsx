@@ -29,18 +29,30 @@ export default function ContactsPage() {
   const [isPrimary, setIsPrimary] = useState(false)
 
   const load = async () => {
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        setLoading(false)
+        return
+      }
 
-    const { data } = await supabase
-      .from('emergency_contacts')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('is_primary', { ascending: false })
+      const { data, error } = await supabase
+        .from('emergency_contacts')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('is_primary', { ascending: false })
 
-    setContacts(data || [])
-    setLoading(false)
+      if (error) {
+        console.error('Load contacts error:', error)
+      }
+
+      setContacts(data || [])
+    } catch (err) {
+      console.error('Load failed:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [])
@@ -49,31 +61,61 @@ export default function ContactsPage() {
     if (!name.trim() || !phone.trim()) return
     setSaving(true)
 
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        setSaving(false)
+        return
+      }
 
-    await supabase.from('emergency_contacts').insert({
-      user_id: user.id,
-      name: name.trim(),
-      phone: phone.trim(),
-      relationship,
-      is_primary: isPrimary,
-    })
+      const { error } = await supabase.from('emergency_contacts').insert({
+        user_id: user.id,
+        name: name.trim(),
+        phone: phone.trim(),
+        relationship,
+        is_primary: isPrimary,
+      })
 
-    setName('')
-    setPhone('')
-    setRelationship('Spouse')
-    setIsPrimary(false)
-    setShowForm(false)
-    setSaving(false)
-    await load()
+      if (error) {
+        console.error('Insert error:', error)
+        setSaving(false)
+        return
+      }
+
+      // Optimistically add the contact to the list
+      const newContact: Contact = {
+        id: crypto.randomUUID(),
+        name: name.trim(),
+        phone: phone.trim(),
+        relationship,
+        is_primary: isPrimary,
+      }
+      setContacts(prev => isPrimary ? [newContact, ...prev] : [...prev, newContact])
+
+      setName('')
+      setPhone('')
+      setRelationship('Spouse')
+      setIsPrimary(false)
+      setShowForm(false)
+      setSaving(false)
+
+      // Then reload from DB to get the real ID
+      await load()
+    } catch (err) {
+      console.error('Add contact failed:', err)
+      setSaving(false)
+    }
   }
 
   const deleteContact = async (id: string) => {
-    const supabase = createClient()
-    await supabase.from('emergency_contacts').delete().eq('id', id)
     setContacts(c => c.filter(x => x.id !== id))
+    const supabase = createClient()
+    const { error } = await supabase.from('emergency_contacts').delete().eq('id', id)
+    if (error) {
+      console.error('Delete error:', error)
+      await load()
+    }
   }
 
   const setPrimary = async (id: string) => {
