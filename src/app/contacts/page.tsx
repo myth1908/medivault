@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { Phone, Plus, Star, Trash2, X } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
@@ -23,6 +22,7 @@ export default function ContactsPage() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [relationship, setRelationship] = useState('Spouse')
@@ -30,24 +30,9 @@ export default function ContactsPage() {
 
   const load = async () => {
     try {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        setLoading(false)
-        return
-      }
-
-      const { data, error } = await supabase
-        .from('emergency_contacts')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('is_primary', { ascending: false })
-
-      if (error) {
-        console.error('Load contacts error:', error)
-      }
-
-      setContacts(data || [])
+      const res = await fetch('/api/contacts')
+      const data = await res.json()
+      setContacts(data.contacts || [])
     } catch (err) {
       console.error('Load failed:', err)
     } finally {
@@ -60,38 +45,27 @@ export default function ContactsPage() {
   const addContact = async () => {
     if (!name.trim() || !phone.trim()) return
     setSaving(true)
+    setError('')
 
     try {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        setSaving(false)
-        return
-      }
-
-      const { error } = await supabase.from('emergency_contacts').insert({
-        user_id: user.id,
-        name: name.trim(),
-        phone: phone.trim(),
-        relationship,
-        is_primary: isPrimary,
+      const res = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          phone: phone.trim(),
+          relationship,
+          is_primary: isPrimary,
+        }),
       })
 
-      if (error) {
-        console.error('Insert error:', error)
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'Failed to add contact')
         setSaving(false)
         return
       }
-
-      // Optimistically add the contact to the list
-      const newContact: Contact = {
-        id: crypto.randomUUID(),
-        name: name.trim(),
-        phone: phone.trim(),
-        relationship,
-        is_primary: isPrimary,
-      }
-      setContacts(prev => isPrimary ? [newContact, ...prev] : [...prev, newContact])
 
       setName('')
       setPhone('')
@@ -99,31 +73,26 @@ export default function ContactsPage() {
       setIsPrimary(false)
       setShowForm(false)
       setSaving(false)
-
-      // Then reload from DB to get the real ID
       await load()
     } catch (err) {
       console.error('Add contact failed:', err)
+      setError('Failed to add contact. Please try again.')
       setSaving(false)
     }
   }
 
   const deleteContact = async (id: string) => {
     setContacts(c => c.filter(x => x.id !== id))
-    const supabase = createClient()
-    const { error } = await supabase.from('emergency_contacts').delete().eq('id', id)
-    if (error) {
-      console.error('Delete error:', error)
-      await load()
-    }
+    const res = await fetch(`/api/contacts?id=${id}`, { method: 'DELETE' })
+    if (!res.ok) await load()
   }
 
   const setPrimary = async (id: string) => {
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    await supabase.from('emergency_contacts').update({ is_primary: false }).eq('user_id', user.id)
-    await supabase.from('emergency_contacts').update({ is_primary: true }).eq('id', id)
+    await fetch('/api/contacts', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_primary', id }),
+    })
     await load()
   }
 
@@ -151,7 +120,12 @@ export default function ContactsPage() {
         </Button>
       </div>
 
-      {/* Add Contact Form */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
       {showForm && (
         <Card className="mb-6 bg-gray-50">
           <div className="flex items-center justify-between mb-4">
@@ -161,19 +135,8 @@ export default function ContactsPage() {
             </button>
           </div>
           <div className="space-y-3">
-            <Input
-              label="Full Name"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="Jane Smith"
-            />
-            <Input
-              label="Phone Number"
-              type="tel"
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              placeholder="+1 (555) 000-0000"
-            />
+            <Input label="Full Name" value={name} onChange={e => setName(e.target.value)} placeholder="Jane Smith" />
+            <Input label="Phone Number" type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 (555) 000-0000" />
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Relationship</label>
               <div className="flex flex-wrap gap-2">
@@ -193,12 +156,7 @@ export default function ContactsPage() {
               </div>
             </div>
             <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={isPrimary}
-                onChange={e => setIsPrimary(e.target.checked)}
-                className="w-4 h-4 accent-red-600"
-              />
+              <input type="checkbox" checked={isPrimary} onChange={e => setIsPrimary(e.target.checked)} className="w-4 h-4 accent-red-600" />
               <span className="text-sm text-gray-700">Set as primary emergency contact</span>
             </label>
             <Button onClick={addContact} loading={saving} className="w-full">
@@ -208,7 +166,6 @@ export default function ContactsPage() {
         </Card>
       )}
 
-      {/* Contacts List */}
       {contacts.length === 0 ? (
         <div className="text-center py-16">
           <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -239,24 +196,14 @@ export default function ContactsPage() {
                 </div>
                 <div className="flex items-center gap-1">
                   {!contact.is_primary && (
-                    <button
-                      onClick={() => setPrimary(contact.id)}
-                      className="p-2 text-gray-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-all"
-                      title="Set as primary"
-                    >
+                    <button onClick={() => setPrimary(contact.id)} className="p-2 text-gray-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-all" title="Set as primary">
                       <Star className="w-4 h-4" />
                     </button>
                   )}
-                  <a
-                    href={`tel:${contact.phone}`}
-                    className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-all"
-                  >
+                  <a href={`tel:${contact.phone}`} className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-all">
                     <Phone className="w-4 h-4" />
                   </a>
-                  <button
-                    onClick={() => deleteContact(contact.id)}
-                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                  >
+                  <button onClick={() => deleteContact(contact.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
