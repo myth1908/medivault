@@ -14,13 +14,17 @@ export interface Guide {
 
 export default async function GuidesPage() {
   const supabase = await createClient()
-  const { data } = await supabase
-    .from('first_aid_guides')
-    .select('id, title, category, emoji, severity, description, steps')
-    .eq('published', true)
-    .order('sort_order', { ascending: true })
+  let rawData = null
+  try {
+    const { data } = await supabase
+      .from('first_aid_guides')
+      .select('id, title, category, emoji, severity, description, steps')
+      .eq('published', true)
+      .order('sort_order', { ascending: true })
+    rawData = data
+  } catch { rawData = null }
 
-  const guides: Guide[] = (data ?? []).map(g => ({
+  const guides: Guide[] = (rawData ?? []).map(g => ({
     id: g.id,
     title: g.title,
     category: g.category,

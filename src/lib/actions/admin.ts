@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createAdminClient, getRoleFromMetadata } from '@/lib/supabase/admin'
 import type { UserRole } from '@/types'
 
 // ─── Auth helper ─────────────────────────────────────────────────────────────
@@ -13,13 +13,9 @@ async function requireAdmin() {
   if (!user) throw new Error('Unauthorized')
 
   const adminClient = createAdminClient()
-  const { data: roleRow } = await adminClient
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', user.id)
-    .single()
+  const { data: { user: adminUser } } = await adminClient.auth.admin.getUserById(user.id)
+  const role = getRoleFromMetadata(adminUser) as UserRole
 
-  const role = (roleRow?.role ?? 'user') as UserRole
   if (role !== 'admin' && role !== 'superadmin') throw new Error('Forbidden')
   return { user, role, adminClient }
 }

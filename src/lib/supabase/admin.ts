@@ -22,3 +22,14 @@ export function createAdminClient() {
     },
   })
 }
+
+/**
+ * Read the role from a user's app_metadata.
+ * Falls back to 'user' if not set.
+ */
+export function getRoleFromMetadata(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  user: { app_metadata?: Record<string, any> } | null
+): string {
+  return user?.app_metadata?.role ?? 'user'
+}

@@ -1,47 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createAdminClient, getRoleFromMetadata } from '@/lib/supabase/admin'
 
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const adminClient = createAdminClient()
 
-    // Only allow this if no superadmin exists yet
-    const { count } = await adminClient
-      .from('user_roles')
-      .select('*', { count: 'exact', head: true })
-      .eq('role', 'superadmin')
+    // Only allow if no superadmin exists yet
+    const { data: { users: allUsers } } = await adminClient.auth.admin.listUsers()
+    const superadminExists = (allUsers ?? []).some(
+      u => getRoleFromMetadata(u) === 'superadmin'
+    )
 
-    if ((count ?? 0) > 0) {
+    if (superadminExists) {
       return NextResponse.json({ error: 'A superadmin already exists.' }, { status: 409 })
     }
 
     const { userId } = await req.json() as { userId: string }
-
     if (!userId || userId !== user.id) {
       return NextResponse.json({ error: 'Invalid userId' }, { status: 400 })
     }
 
-    const { error } = await adminClient
-      .from('user_roles')
-      .upsert({ user_id: userId, role: 'superadmin', granted_by: userId }, { onConflict: 'user_id' })
+    // Stamp role directly into auth.users app_metadata — no DB table needed
+    const { error } = await adminClient.auth.admin.updateUserById(userId, {
+      app_metadata: { role: 'superadmin' },
+    })
 
     if (error) throw error
-
-    await adminClient.from('admin_audit_log').insert({
-      actor_id: userId,
-      action: 'Bootstrap: self-claimed superadmin role',
-      target_type: 'user',
-      target_id: userId,
-      metadata: { bootstrap: true },
-    })
 
     return NextResponse.json({ ok: true })
   } catch (err: unknown) {

@@ -4,21 +4,25 @@ import { BookOpen, Clock } from 'lucide-react'
 
 export default async function AuditLogPage() {
   const adminClient = createAdminClient()
-  const { data: logs } = await adminClient
-    .from('admin_audit_log')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(100)
 
-  // Fetch actor emails
-  const actorIds = [...new Set((logs ?? []).map(l => l.actor_id))]
-  const actorMap: Record<string, string> = {}
+  let logs: {id:string;action:string;actor_id:string;target_type:string;metadata:Record<string,unknown>;created_at:string}[] = []
+  let actorMap: Record<string, string> = {}
 
-  if (actorIds.length > 0) {
-    const { data: authUsers } = await adminClient.auth.admin.listUsers()
-    ;(authUsers?.users ?? []).forEach(u => {
-      actorMap[u.id] = u.email ?? u.id
-    })
+  try {
+    const { data } = await adminClient
+      .from('admin_audit_log')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100)
+
+    logs = data ?? []
+
+    if (logs.length > 0) {
+      const { data: authUsers } = await adminClient.auth.admin.listUsers()
+      ;(authUsers?.users ?? []).forEach(u => { actorMap[u.id] = u.email ?? u.id })
+    }
+  } catch {
+    // Table doesn't exist yet — show empty state
   }
 
   return (
@@ -31,7 +35,7 @@ export default async function AuditLogPage() {
         <p className="text-gray-500">All admin actions, most recent first.</p>
       </div>
 
-      {!logs || logs.length === 0 ? (
+      {logs.length === 0 ? (
         <Card className="text-center py-12">
           <p className="text-gray-500">No admin actions recorded yet.</p>
         </Card>
@@ -50,9 +54,7 @@ export default async function AuditLogPage() {
                     {log.target_type && ` · on ${log.target_type}`}
                   </p>
                   {log.metadata && Object.keys(log.metadata).length > 0 && (
-                    <p className="text-xs text-gray-400 mt-1 font-mono">
-                      {JSON.stringify(log.metadata)}
-                    </p>
+                    <p className="text-xs text-gray-400 mt-1 font-mono">{JSON.stringify(log.metadata)}</p>
                   )}
                 </div>
                 <div className="flex items-center gap-1 text-xs text-gray-400 flex-shrink-0">

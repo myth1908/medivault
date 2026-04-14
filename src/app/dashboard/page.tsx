@@ -79,16 +79,20 @@ export default async function DashboardPage() {
     .select('*')
     .eq('user_id', user.id)
 
-  // Load active announcements (non-expired, published, pinned first)
+  // Load active announcements (non-expired, published, pinned first) — graceful if table missing
   const now = new Date().toISOString()
-  const { data: announcements } = await supabase
-    .from('announcements')
-    .select('id, title, body, type, pinned')
-    .eq('published', true)
-    .or(`expires_at.is.null,expires_at.gt.${now}`)
-    .order('pinned', { ascending: false })
-    .order('created_at', { ascending: false })
-    .limit(5)
+  let announcements: {id:string;title:string;body:string;type:string;pinned:boolean}[] | null = null
+  try {
+    const { data } = await supabase
+      .from('announcements')
+      .select('id, title, body, type, pinned')
+      .eq('published', true)
+      .or(`expires_at.is.null,expires_at.gt.${now}`)
+      .order('pinned', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(5)
+    announcements = data
+  } catch { announcements = null }
 
   const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'there'
   const profileComplete = profile && profile.blood_type && profile.allergies?.length > 0
