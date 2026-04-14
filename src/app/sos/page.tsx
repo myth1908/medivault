@@ -26,6 +26,8 @@ export default function SOSPage() {
   const [countdown, setCountdown] = useState(10)
   const [incidentId, setIncidentId] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [notifyResults, setNotifyResults] = useState<{ contact: string; status: string; error?: string }[]>([])
+  const [notifying, setNotifying] = useState(false)
 
   useEffect(() => {
     const supabase = createClient()
@@ -119,6 +121,25 @@ export default function SOSPage() {
 
     if (incident) setIncidentId(incident.id)
     setStatus('active')
+
+    setNotifying(true)
+    try {
+      const res = await fetch('/api/sos/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          incidentId: incident?.id,
+          emergencyType: selectedType || 'other',
+          location,
+        }),
+      })
+      const data = await res.json()
+      setNotifyResults(data.results || [])
+    } catch (err) {
+      console.error('Notification failed:', err)
+    } finally {
+      setNotifying(false)
+    }
   }
 
   const cancelSOS = async () => {
@@ -156,22 +177,46 @@ export default function SOSPage() {
             <p className="text-sm text-gray-600">{location?.address || 'Getting location...'}</p>
           </Card>
 
-          {contacts.length > 0 && (
-            <Card>
-              <div className="flex items-center gap-2 mb-3">
-                <Phone className="w-4 h-4 text-gray-500" />
-                <span className="text-sm font-semibold">Contacts Notified</span>
+          <Card>
+            <div className="flex items-center gap-2 mb-3">
+              <Phone className="w-4 h-4 text-gray-500" />
+              <span className="text-sm font-semibold">
+                {notifying ? 'Sending Notifications...' : 'Contact Notifications'}
+              </span>
+            </div>
+            {notifying ? (
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                Sending SMS to your emergency contacts...
               </div>
+            ) : notifyResults.length > 0 ? (
               <div className="space-y-2">
-                {contacts.slice(0, 3).map(c => (
-                  <div key={c.id} className="flex items-center gap-2 text-sm">
-                    <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                {notifyResults.map((r, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm">
+                    {r.status === 'sent' ? (
+                      <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                    )}
+                    <span className={r.status === 'sent' ? 'text-gray-800' : 'text-amber-700'}>
+                      {r.contact} — {r.status === 'sent' ? 'SMS sent' : r.error || 'Failed'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : contacts.length > 0 ? (
+              <div className="space-y-2">
+                {contacts.slice(0, 5).map(c => (
+                  <div key={c.id} className="flex items-center gap-2 text-sm text-gray-600">
+                    <Loader2 className="w-4 h-4 animate-spin" />
                     <span>{c.name} ({c.relationship})</span>
                   </div>
                 ))}
               </div>
-            </Card>
-          )}
+            ) : (
+              <p className="text-sm text-gray-500">No emergency contacts added.</p>
+            )}
+          </Card>
 
           {profile && (
             <Card variant="emergency">
