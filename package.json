@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "migrate": "node scripts/run-migrations.js",
+    "migrate:dry": "node scripts/run-migrations.js --dry-run"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.0",
@@ -14,6 +16,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^1.7.0",
     "next": "16.2.2",
+    "pg": "^8.20.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "tailwind-merge": "^3.5.0"
