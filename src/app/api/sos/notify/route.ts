@@ -1,12 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import twilio from 'twilio'
 
-const accountSid = process.env.TWILIO_ACCOUNT_SID
-const authToken = process.env.TWILIO_AUTH_TOKEN
-const twilioPhone = process.env.TWILIO_PHONE_NUMBER
-
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
@@ -48,66 +43,50 @@ export async function POST(request: NextRequest) {
     ? `https://maps.google.com/maps?q=${location.lat},${location.lng}`
     : null
 
-  let message = `🚨 EMERGENCY SOS from ${userName}!\n\n`
+  let message = `EMERGENCY SOS from ${userName}!\n\n`
   message += `Type: ${typeLabel} emergency\n`
-  if (location?.address) message += `📍 Location: ${location.address}\n`
-  if (mapUrl) message += `🗺️ Map: ${mapUrl}\n`
+  if (location?.address) message += `Location: ${location.address}\n`
+  if (mapUrl) message += `Map: ${mapUrl}\n`
 
   if (profile) {
-    if (profile.blood_type) message += `🩸 Blood Type: ${profile.blood_type}\n`
-    if (profile.allergies?.length > 0) message += `⚠️ Allergies: ${profile.allergies.join(', ')}\n`
-    if (profile.medications?.length > 0) message += `💊 Medications: ${profile.medications.join(', ')}\n`
-    if (profile.conditions?.length > 0) message += `🏥 Conditions: ${profile.conditions.join(', ')}\n`
+    if (profile.blood_type) message += `Blood Type: ${profile.blood_type}\n`
+    if (profile.allergies?.length > 0) message += `Allergies: ${profile.allergies.join(', ')}\n`
+    if (profile.medications?.length > 0) message += `Medications: ${profile.medications.join(', ')}\n`
+    if (profile.conditions?.length > 0) message += `Conditions: ${profile.conditions.join(', ')}\n`
   }
 
-  message += `\nThis is an automated emergency alert from MediVault.`
+  message += `\nSent via MediVault Emergency System`
 
-  const results: { contact: string; status: string; error?: string }[] = []
+  const phones = contacts
+    .map(c => normalizePhone(c.phone))
+    .filter((p): p is string => p !== null)
 
-  if (!accountSid || !authToken || !twilioPhone) {
-    return NextResponse.json({
-      error: 'SMS service not configured. Twilio credentials are missing.',
-      contacts: contacts.map(c => ({ contact: c.name, status: 'not_sent', error: 'SMS not configured' })),
-    }, { status: 503 })
-  }
+  const smsUri = `sms:${phones.join(',')}?body=${encodeURIComponent(message)}`
 
-  const client = twilio(accountSid, authToken)
-
-  for (const contact of contacts) {
-    const phone = normalizePhone(contact.phone)
-    if (!phone) {
-      results.push({ contact: contact.name, status: 'failed', error: 'Invalid phone number' })
-      continue
-    }
-
-    try {
-      await client.messages.create({
-        body: message,
-        from: twilioPhone,
-        to: phone,
-      })
-      results.push({ contact: contact.name, status: 'sent' })
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error'
-      results.push({ contact: contact.name, status: 'failed', error: errorMessage })
-    }
-  }
+  const contactDetails = contacts.map(c => ({
+    name: c.name,
+    phone: c.phone,
+    normalized: normalizePhone(c.phone),
+    relationship: c.relationship,
+    whatsappUrl: `https://wa.me/${normalizePhone(c.phone)?.replace('+', '')}?text=${encodeURIComponent(message)}`,
+  }))
 
   if (incidentId) {
     await supabase
       .from('emergency_incidents')
       .update({
-        notifications_sent: results.filter(r => r.status === 'sent').length,
-        notifications_total: results.length,
+        notifications_sent: contacts.length,
+        notifications_total: contacts.length,
       })
       .eq('id', incidentId)
       .eq('user_id', user.id)
   }
 
   return NextResponse.json({
-    sent: results.filter(r => r.status === 'sent').length,
-    total: results.length,
-    results,
+    message,
+    smsUri,
+    contacts: contactDetails,
+    total: contacts.length,
   })
 }
 

@@ -2,12 +2,20 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { AlertCircle, CheckCircle, Loader2, MapPin, Phone, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, Loader2, MapPin, MessageCircle, Phone, Send, X } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import type { EmergencyContact, MedicalProfile } from '@/types'
 
 type SOSStatus = 'idle' | 'locating' | 'confirming' | 'sending' | 'active' | 'cancelled'
+
+interface ContactNotification {
+  name: string
+  phone: string
+  normalized: string | null
+  relationship: string
+  whatsappUrl: string
+}
 
 const emergencyTypes = [
   { id: 'cardiac', label: 'Cardiac / Heart', emoji: '❤️', color: 'border-red-400 bg-red-50' },
@@ -26,20 +34,20 @@ export default function SOSPage() {
   const [countdown, setCountdown] = useState(10)
   const [incidentId, setIncidentId] = useState<string | null>(null)
   const [error, setError] = useState('')
-  const [notifyResults, setNotifyResults] = useState<{ contact: string; status: string; error?: string }[]>([])
-  const [notifying, setNotifying] = useState(false)
+  const [notifyContacts, setNotifyContacts] = useState<ContactNotification[]>([])
+  const [smsUri, setSmsUri] = useState('')
+  const [smsOpened, setSmsOpened] = useState(false)
 
   useEffect(() => {
-    const supabase = createClient()
     const loadData = async () => {
+      const res = await fetch('/api/contacts')
+      const data = await res.json()
+      if (data.contacts) setContacts(data.contacts)
+
+      const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-
-      const [{ data: c }, { data: p }] = await Promise.all([
-        supabase.from('emergency_contacts').select('*').eq('user_id', user.id),
-        supabase.from('medical_profiles').select('*').eq('user_id', user.id).single(),
-      ])
-      if (c) setContacts(c)
+      const { data: p } = await supabase.from('medical_profiles').select('*').eq('user_id', user.id).single()
       if (p) setProfile(p)
     }
     loadData()
@@ -54,7 +62,6 @@ export default function SOSPage() {
       navigator.geolocation.getCurrentPosition(
         async pos => {
           const { latitude: lat, longitude: lng } = pos.coords
-          // Try to reverse geocode for address
           let address = `${lat.toFixed(4)}, ${lng.toFixed(4)}`
           try {
             const res = await fetch(
@@ -120,9 +127,7 @@ export default function SOSPage() {
       .single()
 
     if (incident) setIncidentId(incident.id)
-    setStatus('active')
 
-    setNotifying(true)
     try {
       const res = await fetch('/api/sos/notify', {
         method: 'POST',
@@ -134,12 +139,18 @@ export default function SOSPage() {
         }),
       })
       const data = await res.json()
-      setNotifyResults(data.results || [])
+      setNotifyContacts(data.contacts || [])
+      setSmsUri(data.smsUri || '')
+
+      if (data.smsUri) {
+        window.location.href = data.smsUri
+        setSmsOpened(true)
+      }
     } catch (err) {
-      console.error('Notification failed:', err)
-    } finally {
-      setNotifying(false)
+      console.error('Notification setup failed:', err)
     }
+
+    setStatus('active')
   }
 
   const cancelSOS = async () => {
@@ -161,11 +172,10 @@ export default function SOSPage() {
   if (status === 'active') {
     return (
       <div className="max-w-xl mx-auto px-4 py-8">
-        <div className="bg-red-600 rounded-3xl p-8 text-white text-center mb-6">
-          <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 animate-ping absolute left-1/2 -translate-x-1/2" />
-          <AlertCircle className="w-20 h-20 mx-auto mb-4 relative" />
+        <div className="bg-red-600 rounded-3xl p-8 text-white text-center mb-6 relative overflow-hidden">
+          <AlertCircle className="w-20 h-20 mx-auto mb-4" />
           <h1 className="text-3xl font-extrabold mb-2">SOS ACTIVE</h1>
-          <p className="text-red-100">Emergency alert sent. Help is on the way.</p>
+          <p className="text-red-100">Emergency incident logged. Notify your contacts below.</p>
         </div>
 
         <div className="space-y-4 mb-6">
@@ -175,48 +185,76 @@ export default function SOSPage() {
               <span className="text-sm font-semibold">Your Location</span>
             </div>
             <p className="text-sm text-gray-600">{location?.address || 'Getting location...'}</p>
-          </Card>
-
-          <Card>
-            <div className="flex items-center gap-2 mb-3">
-              <Phone className="w-4 h-4 text-gray-500" />
-              <span className="text-sm font-semibold">
-                {notifying ? 'Sending Notifications...' : 'Contact Notifications'}
-              </span>
-            </div>
-            {notifying ? (
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                Sending SMS to your emergency contacts...
-              </div>
-            ) : notifyResults.length > 0 ? (
-              <div className="space-y-2">
-                {notifyResults.map((r, i) => (
-                  <div key={i} className="flex items-center gap-2 text-sm">
-                    {r.status === 'sent' ? (
-                      <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                    )}
-                    <span className={r.status === 'sent' ? 'text-gray-800' : 'text-amber-700'}>
-                      {r.contact} — {r.status === 'sent' ? 'SMS sent' : r.error || 'Failed'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : contacts.length > 0 ? (
-              <div className="space-y-2">
-                {contacts.slice(0, 5).map(c => (
-                  <div key={c.id} className="flex items-center gap-2 text-sm text-gray-600">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>{c.name} ({c.relationship})</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">No emergency contacts added.</p>
+            {location?.lat !== 0 && (
+              <a
+                href={`https://maps.google.com/maps?q=${location?.lat},${location?.lng}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-600 underline mt-1 inline-block"
+              >
+                Open in Google Maps
+              </a>
             )}
           </Card>
+
+          {/* SMS to all contacts at once */}
+          {smsUri && (
+            <a
+              href={smsUri}
+              className="flex items-center justify-center gap-3 w-full p-4 bg-green-600 hover:bg-green-700 text-white rounded-2xl font-bold text-lg transition-all shadow-lg"
+            >
+              <Send className="w-6 h-6" />
+              {smsOpened ? 'Send SMS Again to All Contacts' : 'Send SMS to All Contacts'}
+            </a>
+          )}
+
+          {/* Individual contact actions */}
+          {notifyContacts.length > 0 && (
+            <Card>
+              <div className="flex items-center gap-2 mb-3">
+                <Phone className="w-4 h-4 text-gray-500" />
+                <span className="text-sm font-semibold">Emergency Contacts</span>
+              </div>
+              <div className="space-y-3">
+                {notifyContacts.map((c, i) => (
+                  <div key={i} className="flex items-center gap-3 p-2 rounded-xl bg-gray-50">
+                    <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center text-sm font-bold text-gray-600">
+                      {c.name.charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm text-gray-900 truncate">{c.name}</p>
+                      <p className="text-xs text-gray-500">{c.phone}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <a
+                        href={`tel:${c.normalized || c.phone}`}
+                        className="p-2 bg-red-100 hover:bg-red-200 rounded-lg transition-all"
+                        title="Call"
+                      >
+                        <Phone className="w-4 h-4 text-red-600" />
+                      </a>
+                      <a
+                        href={`sms:${c.normalized || c.phone}`}
+                        className="p-2 bg-blue-100 hover:bg-blue-200 rounded-lg transition-all"
+                        title="SMS"
+                      >
+                        <Send className="w-4 h-4 text-blue-600" />
+                      </a>
+                      <a
+                        href={c.whatsappUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 bg-green-100 hover:bg-green-200 rounded-lg transition-all"
+                        title="WhatsApp"
+                      >
+                        <MessageCircle className="w-4 h-4 text-green-600" />
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
 
           {profile && (
             <Card variant="emergency">
@@ -263,7 +301,6 @@ export default function SOSPage() {
         <p className="text-gray-600 mt-1">Press the button to send an emergency alert</p>
       </div>
 
-      {/* Big SOS Button */}
       <div className="flex flex-col items-center mb-10">
         <button
           onClick={status === 'idle' ? handleSOSPress : undefined}
@@ -286,7 +323,6 @@ export default function SOSPage() {
               <span className="text-2xl font-extrabold">SOS</span>
             </div>
           )}
-          {/* Pulse rings */}
           {status === 'idle' && (
             <>
               <span className="absolute inset-0 rounded-full bg-red-400 opacity-30 animate-ping" />
@@ -296,11 +332,7 @@ export default function SOSPage() {
         </button>
 
         {status === 'confirming' && (
-          <Button
-            variant="outline"
-            className="mt-6"
-            onClick={cancelSOS}
-          >
+          <Button variant="outline" className="mt-6" onClick={cancelSOS}>
             <X className="w-4 h-4" />
             Cancel
           </Button>
@@ -313,7 +345,6 @@ export default function SOSPage() {
         </div>
       )}
 
-      {/* Emergency Type */}
       <div className="mb-8">
         <h2 className="text-sm font-semibold text-gray-700 mb-3">Emergency type (optional)</h2>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -334,14 +365,21 @@ export default function SOSPage() {
         </div>
       </div>
 
-      {/* Info */}
+      {contacts.length === 0 && (
+        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+          <p className="text-sm text-amber-800 font-medium">No emergency contacts added yet.</p>
+          <p className="text-xs text-amber-600 mt-1">Go to Contacts to add people who should be notified in an emergency.</p>
+        </div>
+      )}
+
       <Card className="bg-gray-50">
         <p className="text-xs font-semibold text-gray-700 mb-2">What happens when you press SOS:</p>
         <div className="space-y-1.5 text-xs text-gray-600">
           <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Your GPS location is captured</div>
-          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Emergency contacts are notified</div>
-          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Alert logged with your medical profile</div>
-          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Responders can access your health info</div>
+          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Emergency incident is logged</div>
+          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> SMS app opens with message to all contacts</div>
+          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Call, SMS, or WhatsApp each contact individually</div>
+          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Your medical profile is shared with responders</div>
         </div>
       </Card>
     </div>
