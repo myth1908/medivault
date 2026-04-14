@@ -6,6 +6,8 @@ import { cn } from '@/lib/utils'
 import {
   Activity,
   AlertCircle,
+  BookOpen,
+  FileText,
   LayoutDashboard,
   LogOut,
   Settings,
@@ -14,6 +16,8 @@ import {
 
 const navItems = [
   { href: '/admin', label: 'Overview', icon: LayoutDashboard, exact: true },
+  { href: '/admin/content', label: 'Edit Content', icon: FileText },
+  { href: '/admin/guides', label: 'Manage Guides', icon: BookOpen },
   { href: '/admin/users', label: 'Users', icon: Users },
   { href: '/admin/incidents', label: 'Incidents', icon: AlertCircle },
   { href: '/admin/settings', label: 'Settings', icon: Settings },
