@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Phone, Plus, Star, Trash2, X } from 'lucide-react'
+import { Bell, Check, Copy, Phone, Plus, Share2, Star, Trash2, X } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import { Card } from '@/components/ui/Card'
@@ -27,6 +27,8 @@ export default function ContactsPage() {
   const [phone, setPhone] = useState('')
   const [relationship, setRelationship] = useState('Spouse')
   const [isPrimary, setIsPrimary] = useState(false)
+  const [userId, setUserId] = useState('')
+  const [linkCopied, setLinkCopied] = useState(false)
 
   const load = async () => {
     try {
@@ -40,7 +42,15 @@ export default function ContactsPage() {
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    import('@/lib/supabase/client').then(({ createClient }) => {
+      const supabase = createClient()
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) setUserId(user.id)
+      })
+    })
+  }, [])
 
   const addContact = async () => {
     if (!name.trim() || !phone.trim()) return
@@ -213,11 +223,49 @@ export default function ContactsPage() {
         </div>
       )}
 
-      <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-2xl">
-        <p className="text-xs text-blue-700">
-          <strong>Note:</strong> When you activate SOS, all your emergency contacts will be notified with your name, location, and emergency type.
-        </p>
-      </div>
+      {userId && contacts.length > 0 && (
+        <div className="mt-8 p-5 bg-blue-50 border border-blue-200 rounded-2xl">
+          <div className="flex items-start gap-3">
+            <Bell className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-sm text-blue-900">Share alert link with your contacts</p>
+              <p className="text-xs text-blue-700 mt-1">
+                Send this link to your contacts so they receive automatic push notifications on their phone when you trigger SOS.
+              </p>
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={() => {
+                    const url = `${window.location.origin}/emergency/medivault-sos-${userId.slice(0, 12)}`
+                    navigator.clipboard.writeText(url)
+                    setLinkCopied(true)
+                    setTimeout(() => setLinkCopied(false), 2000)
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-all"
+                >
+                  {linkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {linkCopied ? 'Copied!' : 'Copy Link'}
+                </button>
+                {typeof navigator !== 'undefined' && 'share' in navigator && (
+                  <button
+                    onClick={() => {
+                      const url = `${window.location.origin}/emergency/medivault-sos-${userId.slice(0, 12)}`
+                      navigator.share({
+                        title: 'MediVault Emergency Alerts',
+                        text: 'Subscribe to my emergency SOS alerts. You will be notified instantly if I trigger an emergency.',
+                        url,
+                      }).catch(() => {})
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-white text-blue-700 text-xs font-medium rounded-lg border border-blue-300 hover:bg-blue-100 transition-all"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    Share
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

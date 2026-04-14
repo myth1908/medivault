@@ -18,10 +18,6 @@ export async function POST(request: Request) {
     .eq('user_id', user.id)
     .order('is_primary', { ascending: false })
 
-  if (!contacts || contacts.length === 0) {
-    return NextResponse.json({ error: 'No emergency contacts found' }, { status: 400 })
-  }
-
   const { data: profile } = await supabase
     .from('medical_profiles')
     .select('*')
@@ -55,15 +51,37 @@ export async function POST(request: Request) {
     if (profile.conditions?.length > 0) message += `Conditions: ${profile.conditions.join(', ')}\n`
   }
 
-  message += `\nSent via MediVault Emergency System`
+  // Send push notification via ntfy.sh (automatic, no user action needed)
+  const ntfyTopic = `medivault-sos-${user.id.slice(0, 12)}`
+  let pushSent = false
 
-  const phones = contacts
+  try {
+    const ntfyRes = await fetch(`https://ntfy.sh/${ntfyTopic}`, {
+      method: 'POST',
+      headers: {
+        'Title': `EMERGENCY SOS - ${userName}`,
+        'Priority': 'urgent',
+        'Tags': 'rotating_light,ambulance',
+        'Click': mapUrl || '',
+      },
+      body: message,
+    })
+    pushSent = ntfyRes.ok
+  } catch (err) {
+    console.error('ntfy.sh push failed:', err)
+  }
+
+  // Build SMS URI for manual backup
+  const phones = (contacts || [])
     .map(c => normalizePhone(c.phone))
     .filter((p): p is string => p !== null)
 
-  const smsUri = `sms:${phones.join(',')}?body=${encodeURIComponent(message)}`
+  const smsMessage = message.replace(/\n/g, ' ').slice(0, 160)
+  const smsUri = phones.length > 0
+    ? `sms:${phones.join(',')}?body=${encodeURIComponent(smsMessage)}`
+    : ''
 
-  const contactDetails = contacts.map(c => ({
+  const contactDetails = (contacts || []).map(c => ({
     name: c.name,
     phone: c.phone,
     normalized: normalizePhone(c.phone),
@@ -75,18 +93,21 @@ export async function POST(request: Request) {
     await supabase
       .from('emergency_incidents')
       .update({
-        notifications_sent: contacts.length,
-        notifications_total: contacts.length,
+        notifications_sent: pushSent ? 1 : 0,
+        notifications_total: (contacts || []).length,
       })
       .eq('id', incidentId)
       .eq('user_id', user.id)
   }
 
   return NextResponse.json({
+    pushSent,
+    ntfyTopic,
+    subscribeUrl: `https://ntfy.sh/${ntfyTopic}`,
     message,
     smsUri,
     contacts: contactDetails,
-    total: contacts.length,
+    total: (contacts || []).length,
   })
 }
 

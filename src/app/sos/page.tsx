@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { AlertCircle, CheckCircle, Loader2, MapPin, MessageCircle, Phone, Send, X } from 'lucide-react'
+import { AlertCircle, CheckCircle, Loader2, MapPin, MessageCircle, Phone, Send, X, Bell } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import type { EmergencyContact, MedicalProfile } from '@/types'
@@ -36,7 +36,7 @@ export default function SOSPage() {
   const [error, setError] = useState('')
   const [notifyContacts, setNotifyContacts] = useState<ContactNotification[]>([])
   const [smsUri, setSmsUri] = useState('')
-  const [smsOpened, setSmsOpened] = useState(false)
+  const [pushSent, setPushSent] = useState(false)
 
   useEffect(() => {
     const loadData = async () => {
@@ -69,9 +69,7 @@ export default function SOSPage() {
             )
             const data = await res.json()
             address = data.display_name || address
-          } catch {
-            // fallback to coordinates
-          }
+          } catch { /* use coords */ }
           resolve({ lat, lng, address })
         },
         err => reject(err),
@@ -141,13 +139,9 @@ export default function SOSPage() {
       const data = await res.json()
       setNotifyContacts(data.contacts || [])
       setSmsUri(data.smsUri || '')
-
-      if (data.smsUri) {
-        window.location.href = data.smsUri
-        setSmsOpened(true)
-      }
+      setPushSent(data.pushSent || false)
     } catch (err) {
-      console.error('Notification setup failed:', err)
+      console.error('Notification failed:', err)
     }
 
     setStatus('active')
@@ -172,22 +166,42 @@ export default function SOSPage() {
   if (status === 'active') {
     return (
       <div className="max-w-xl mx-auto px-4 py-8">
-        <div className="bg-red-600 rounded-3xl p-8 text-white text-center mb-6 relative overflow-hidden">
+        <div className="bg-red-600 rounded-3xl p-8 text-white text-center mb-6">
           <AlertCircle className="w-20 h-20 mx-auto mb-4" />
           <h1 className="text-3xl font-extrabold mb-2">SOS ACTIVE</h1>
-          <p className="text-red-100">Emergency incident logged. Notify your contacts below.</p>
+          <p className="text-red-100">Emergency alert has been sent.</p>
         </div>
 
         <div className="space-y-4 mb-6">
+          {/* Push notification status */}
+          <Card className={pushSent ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}>
+            <div className="flex items-center gap-3">
+              {pushSent ? (
+                <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+              ) : (
+                <Bell className="w-5 h-5 text-amber-600 flex-shrink-0" />
+              )}
+              <div>
+                <p className="font-semibold text-sm">
+                  {pushSent ? 'Push notification sent automatically' : 'Push notification sent'}
+                </p>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  Contacts subscribed to your alerts will receive this instantly on their phone.
+                </p>
+              </div>
+            </div>
+          </Card>
+
+          {/* Location */}
           <Card>
             <div className="flex items-center gap-3 mb-3">
               <MapPin className="w-4 h-4 text-gray-500" />
               <span className="text-sm font-semibold">Your Location</span>
             </div>
             <p className="text-sm text-gray-600">{location?.address || 'Getting location...'}</p>
-            {location?.lat !== 0 && (
+            {location && location.lat !== 0 && (
               <a
-                href={`https://maps.google.com/maps?q=${location?.lat},${location?.lng}`}
+                href={`https://maps.google.com/maps?q=${location.lat},${location.lng}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs text-blue-600 underline mt-1 inline-block"
@@ -197,23 +211,23 @@ export default function SOSPage() {
             )}
           </Card>
 
-          {/* SMS to all contacts at once */}
+          {/* SMS backup button */}
           {smsUri && (
             <a
               href={smsUri}
-              className="flex items-center justify-center gap-3 w-full p-4 bg-green-600 hover:bg-green-700 text-white rounded-2xl font-bold text-lg transition-all shadow-lg"
+              className="flex items-center justify-center gap-3 w-full p-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-base transition-all shadow-lg"
             >
-              <Send className="w-6 h-6" />
-              {smsOpened ? 'Send SMS Again to All Contacts' : 'Send SMS to All Contacts'}
+              <Send className="w-5 h-5" />
+              Also Send SMS to Contacts
             </a>
           )}
 
-          {/* Individual contact actions */}
+          {/* Individual contacts */}
           {notifyContacts.length > 0 && (
             <Card>
               <div className="flex items-center gap-2 mb-3">
                 <Phone className="w-4 h-4 text-gray-500" />
-                <span className="text-sm font-semibold">Emergency Contacts</span>
+                <span className="text-sm font-semibold">Contact Directly</span>
               </div>
               <div className="space-y-3">
                 {notifyContacts.map((c, i) => (
@@ -226,27 +240,10 @@ export default function SOSPage() {
                       <p className="text-xs text-gray-500">{c.phone}</p>
                     </div>
                     <div className="flex items-center gap-1">
-                      <a
-                        href={`tel:${c.normalized || c.phone}`}
-                        className="p-2 bg-red-100 hover:bg-red-200 rounded-lg transition-all"
-                        title="Call"
-                      >
+                      <a href={`tel:${c.normalized || c.phone}`} className="p-2 bg-red-100 hover:bg-red-200 rounded-lg transition-all" title="Call">
                         <Phone className="w-4 h-4 text-red-600" />
                       </a>
-                      <a
-                        href={`sms:${c.normalized || c.phone}`}
-                        className="p-2 bg-blue-100 hover:bg-blue-200 rounded-lg transition-all"
-                        title="SMS"
-                      >
-                        <Send className="w-4 h-4 text-blue-600" />
-                      </a>
-                      <a
-                        href={c.whatsappUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2 bg-green-100 hover:bg-green-200 rounded-lg transition-all"
-                        title="WhatsApp"
-                      >
+                      <a href={c.whatsappUrl} target="_blank" rel="noopener noreferrer" className="p-2 bg-green-100 hover:bg-green-200 rounded-lg transition-all" title="WhatsApp">
                         <MessageCircle className="w-4 h-4 text-green-600" />
                       </a>
                     </div>
@@ -256,9 +253,10 @@ export default function SOSPage() {
             </Card>
           )}
 
+          {/* Medical info */}
           {profile && (
             <Card variant="emergency">
-              <p className="text-xs font-semibold text-red-700 mb-2">Medical Info for Responders</p>
+              <p className="text-xs font-semibold text-red-700 mb-2">Medical Info Shared</p>
               <div className="space-y-1 text-sm text-gray-700">
                 {profile.blood_type && <p>🩸 Blood Type: <strong>{profile.blood_type}</strong></p>}
                 {profile.allergies?.length > 0 && <p>⚠️ Allergies: {profile.allergies.join(', ')}</p>}
@@ -268,12 +266,7 @@ export default function SOSPage() {
           )}
         </div>
 
-        <Button
-          variant="outline"
-          className="w-full"
-          size="lg"
-          onClick={cancelSOS}
-        >
+        <Button variant="outline" className="w-full" size="lg" onClick={cancelSOS}>
           <X className="w-4 h-4" />
           Cancel Emergency Alert
         </Button>
@@ -298,7 +291,7 @@ export default function SOSPage() {
     <div className="max-w-xl mx-auto px-4 py-8">
       <div className="text-center mb-8">
         <h1 className="text-2xl font-extrabold text-gray-900">Emergency SOS</h1>
-        <p className="text-gray-600 mt-1">Press the button to send an emergency alert</p>
+        <p className="text-gray-600 mt-1">Press the button to alert your emergency contacts</p>
       </div>
 
       <div className="flex flex-col items-center mb-10">
@@ -367,8 +360,8 @@ export default function SOSPage() {
 
       {contacts.length === 0 && (
         <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
-          <p className="text-sm text-amber-800 font-medium">No emergency contacts added yet.</p>
-          <p className="text-xs text-amber-600 mt-1">Go to Contacts to add people who should be notified in an emergency.</p>
+          <p className="text-sm text-amber-800 font-medium">No emergency contacts added.</p>
+          <p className="text-xs text-amber-600 mt-1">Add contacts first so they can be notified.</p>
         </div>
       )}
 
@@ -377,9 +370,9 @@ export default function SOSPage() {
         <div className="space-y-1.5 text-xs text-gray-600">
           <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Your GPS location is captured</div>
           <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Emergency incident is logged</div>
-          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> SMS app opens with message to all contacts</div>
-          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Call, SMS, or WhatsApp each contact individually</div>
-          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Your medical profile is shared with responders</div>
+          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Push notification sent to subscribed contacts</div>
+          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Call, SMS, or WhatsApp each contact</div>
+          <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> Medical profile shared with responders</div>
         </div>
       </Card>
     </div>
